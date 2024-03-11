@@ -372,6 +372,7 @@ function get_x(xyz::XYZ, ind = trues(xyz.traj.N),
         push!(d,Symbol(rpy,"_cos_fdm")=>fdm(cos.(rpy_)))
     end
 
+
     # low-pass filter current sensors
     if N > 12
         lpf = get_bpf(;pass1=0.0,pass2=0.2,fs=1/xyz.traj.dt);

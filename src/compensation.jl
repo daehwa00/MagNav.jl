@@ -419,6 +419,7 @@ function nn_comp_2_train(A, x, y, no_norm;
                                    TL_coef_norm = TL_coef_norm,
                                    denorm       = false,
                                    testmode     = false)
+        println(y_hat_norm)
         return mse(y_hat_norm, vec(y_norm))
     end # function loss_m2
 

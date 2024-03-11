@@ -1161,11 +1161,7 @@ module MagNav
 
     |**Field**|**Type**|**Description**
     |:--|:--|:--
-    |`maps`          |Vector{`MapS`{`Float64`}}| vector of `MapS` scalar magnetic anomaly map structs, not filled-in
-    |`maps_filled`   |Vector{`MapS`{`Float64`}}| vector of `MapS` scalar magnetic anomaly map structs, filled-in
-    |`map_sort_ind`  |Vector{`Int64`}          | `maps` indices sorted by altitude
-    |`fallback`      |`MapS`{`Float64`}        | fallback `MapS` scalar magnetic anomaly map struct, filled-in
-    |`map_cache`     |Dict                     | `maps`     cache of scalar map interpolation functions at multiple altitudes
+    |`maps`          |bpf_dataDict                     | `maps`     cache of scalar map interpolation functions at multiple altitudes
     |`fallback_cache`|Dict                     | `fallback` cache of scalar map interpolation functions at multiple altitudes
     |`dz`            |Real                     | step size between map altitude levels [m]
     """
