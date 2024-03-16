@@ -11,16 +11,19 @@ from julia import Main
 
 Main.eval(
     """
-cd(@__DIR__)
-
+using Pkg
+Pkg.develop(path="../../MagNav.jl") 
 using MagNav
+
+using Revise
 using CSV, DataFrames
-using Plots: plot, plot!
 using Plots
 using Random: seed!
 using Statistics: mean, median, std
 seed!(33);
-include("dataframes_setup.jl");
+# 상위 디렉토리의 파일을 포함
+include("dataframes_setup.jl")
+
 
 flight = :Flt1006 # select flight, full list in df_flight
 xyz    = get_XYZ(flight,df_flight); # load flight data
@@ -37,7 +40,6 @@ ind  = get_ind(xyz,line,df_options); # get Boolean indices
 # lpf     = get_bpf(;pass1=0.0,pass2=0.2,fs=10.0) # get low-pass filter
 # lpf_sig = -bpf_data(xyz.cur_strb[ind];bpf=lpf)  # apply low-pass filter, sign switched for easier comparison
 # p5      = plot_basic(xyz.traj.tt[ind],lpf_sig;lab="filtered current for strobe lights"); # plot the low-pass filtered strobe light current sensor
-
 """
 )
 
@@ -148,16 +150,21 @@ comp_params = NNCompParams(features_setup = features,
                            norm_type_y    = :standardize,
                            TL_coef        = TL_d_4,
                            η_adam         = 0.001,
-                           epoch_adam     = 300,
+                           epoch_adam     = 10,
                            epoch_lbfgs    = 0,
                            hidden         = [8,4]);
 (comp_params,y_train,y_train_hat,err_train,feats) =
     comp_train(comp_params,lines_train,df_all,df_flight,df_map);
 
-println(comp_params)
-println(feats)
-(_,y_hat,_) =
+(y,y_hat,err,features) =
     comp_test(comp_params,[line],df_all,df_flight,df_map);
 
+println("output: ",y[1:5])
+println("prediction: ",y_hat[1:5])
+println("error: ",err[1:5] )
+
+println("output len: ",length(y))
+println("prediction len: ",length(y_hat))
+println("error len: ", length(err))
 """
 )
