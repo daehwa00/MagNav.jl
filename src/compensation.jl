@@ -3380,6 +3380,8 @@ function comp_test(comp_params::CompParams, lines,
 
     silent || print_time(time()-t0,1)
 
+    err = y - y_hat
+
     return (y, y_hat, err, features)
 end # function comp_test
 

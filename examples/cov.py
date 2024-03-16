@@ -1,3 +1,7 @@
+import torch
+import torch.nn as nn
+import torch.optim as optim
+
 import h5py
 import numpy as np
 from scipy.signal import butter, sosfilt
@@ -5,6 +9,7 @@ import matplotlib.pyplot as plt
 from copy import deepcopy
 from julia.api import Julia
 from scipy.signal import medfilt
+
 
 jl = Julia(compiled_modules=False)
 from julia import Main
@@ -150,7 +155,7 @@ comp_params = NNCompParams(features_setup = features,
                            norm_type_y    = :standardize,
                            TL_coef        = TL_d_4,
                            η_adam         = 0.001,
-                           epoch_adam     = 10,
+                           epoch_adam     = 300,
                            epoch_lbfgs    = 0,
                            hidden         = [8,4]);
 (comp_params,y_train,y_train_hat,err_train,feats) =
