@@ -2919,8 +2919,8 @@ function comp_train(comp_params::CompParams, lines,
                                                            return_B         = true,
                                                            silent           = silent_debug)
     else
-        (A,x,y,no_norm,features,l_segs) = get_Axy(lines,df_line,df_flight,df_map,
-                                                  features_setup;
+        
+        (A,x,y,no_norm,features,l_segs) = get_Axy(lines,df_line,df_flight,df_map,features_setup;
                                                   features_no_norm = features_no_norm,
                                                   y_type           = y_type,
                                                   use_mag          = use_mag,
@@ -2935,6 +2935,7 @@ function comp_train(comp_params::CompParams, lines,
                                                   map_TL           = map_TL,
                                                   return_B         = false,
                                                   silent           = silent_debug)
+
     end
 
     y_hat = zero(y) # initialize
@@ -3280,6 +3281,8 @@ function comp_test(comp_params::CompParams, lines,
                                             map_TL           = map_TL,
                                             return_B         = false,
                                             silent           = silent_debug)
+
+
     end
 
     y_hat = zero(y) # initialize

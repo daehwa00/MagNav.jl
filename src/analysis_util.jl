@@ -889,10 +889,6 @@ function get_Axy(lines, df_line::DataFrame,
                  return_B::Bool     = false,
                  silent::Bool       = true)
 
-    if l_seq != -1
-        @warn("this version of get_Axy() is deprecated & will be removed in MagNav.jl v1.2.0, use get_Axy(; l_window::Int)")
-        l_window = l_seq
-    end
 
     # check if lines are in df_line, remove if not
     for l in lines
@@ -1000,9 +996,12 @@ function get_Axy(lines, df_line::DataFrame,
         end
     end
 
+    println("X shape: ", size(x))
     if return_B
+        println("HIHI")
         return (A, Bt, B_dot, x, y, no_norm, features, l_segs)
     else
+        println("HEEEELLLLOOOO")
         return (A, x, y, no_norm, features, l_segs)
     end
 end # function get_Axy

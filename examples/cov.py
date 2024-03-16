@@ -156,7 +156,7 @@ comp_params = NNCompParams(features_setup = features,
                            norm_type_y    = :standardize,
                            TL_coef        = TL_d_4,
                            η_adam         = 0.001,
-                           epoch_adam     = 300,
+                           epoch_adam     = 10,
                            epoch_lbfgs    = 0,
                            hidden         = [8,4]);
 (comp_params,y_train,y_train_hat,err_train,feats) =
@@ -176,7 +176,7 @@ println("error len: ", length(err))
 )
 
 # Hyperparameters
-input_dim = 4  # number of input features
+input_dim = 5  # number of input features
 hidden_dim = 128
 output_dim = 2
 
@@ -212,12 +212,38 @@ class ActorCritic(nn.Module):
 
 # 강화학습 학습 과정
 def train_rl_model(epochs=10):
-    model = ActorCritic()
+    model = ActorCritic(input_dim, hidden_dim, output_dim)
     optimizer = optim.Adam(model.parameters(), lr=0.01)
 
     for epoch in range(epochs):
-        # Adversarial Attack 생성 및 MagNav 시뮬레이션
-        action = model.generate_action()
+        Main.eval(
+            """
+        line = 1006.08
+        features_setup = [:mag_4_uc, :lpf_cur_com_1, :lpf_cur_strb, :lpf_cur_outpwr, :lpf_cur_ac_lo]
+        features_no_norm = Symbol[]
+        y_type = :d
+        use_mag = :mag_4_uc
+        use_vec = :flux_d
+        terms = [:permanent, :induced, :fdm]
+        terms_A = [:permanent, :induced, :eddy]
+        sub_diurnal = true
+        sub_igrf = true
+        bpf_mag = false
+        reorient_vec = false
+        mod_TL = false
+        map_TL = false
+        return_B = true
+        silent = true
+        """
+        )
+        Main.eval(
+            """
+        (A, Bt, B_dot, x, y, no_norm, features, l_segs) = get_Axy([line], df_all, df_flight, df_map, features_setup; features_no_norm = features_no_norm, y_type = y_type, use_mag = use_mag, use_vec = use_vec, terms = terms, terms_A = terms_A, sub_diurnal = sub_diurnal, sub_igrf = sub_igrf, bpf_mag = bpf_mag, reorient_vec = reorient_vec, mod_TL = mod_TL, map_TL = map_TL, return_B = return_B, silent = silent); 
+        """
+        )
+        x = Main.x
+        x = torch.tensor(x, dtype=torch.float32)
+        action = model(x)
         Main.eval("action = {}".format(action))
         Main.eval(
             """
