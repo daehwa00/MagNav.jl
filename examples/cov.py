@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 
 import h5py
@@ -173,3 +174,70 @@ println("prediction len: ",length(y_hat))
 println("error len: ", length(err))
 """
 )
+
+# Hyperparameters
+input_dim = 4  # number of input features
+hidden_dim = 128
+output_dim = 2
+
+
+class ActorCritic(nn.Module):
+    def __init__(self, input_dim, hidden_dim, action_dim):
+        super(ActorCritic, self).__init__()
+        self.common_layer = nn.Linear(input_dim, hidden_dim)
+
+        self.actor_mu = nn.Linear(hidden_dim, action_dim)
+
+        self.actor_log_std = nn.Parameter(torch.zeros(1, action_dim))
+
+        self.critic = nn.Linear(hidden_dim, 1)
+
+    def forward(self, x):
+        x = F.relu(self.common_layer(x))
+
+        mu = self.actor_mu(x)
+        log_std = self.actor_log_std.expand_as(mu)
+        std = torch.exp(log_std)
+
+        normal_dist = torch.distributions.Normal(mu, std)
+
+        action = normal_dist.rsample()  # Reparameterization Trick
+
+        action = torch.tanh(action)
+
+        state_value = self.critic(x)
+
+        return action, state_value, mu, log_std
+
+
+# 강화학습 학습 과정
+def train_rl_model(epochs=10):
+    model = ActorCritic()
+    optimizer = optim.Adam(model.parameters(), lr=0.01)
+
+    for epoch in range(epochs):
+        # Adversarial Attack 생성 및 MagNav 시뮬레이션
+        action = model.generate_action()
+        Main.eval("action = {}".format(action))
+        Main.eval(
+            """
+        # MagNav 시뮬레이션 코드
+        (y,y_hat,err,features) = comp_test_RL(comp_params,[line],df_all,df_flight,df_map, action);
+        """
+        )
+        err = Main.eval("err")
+
+        # 보상 계산 및 모델 업데이트
+        reward = calculate_reward(err)  # 오류를 기반으로 보상 계산 함수
+        loss = model.update(reward)  # 모델 업데이트
+        optimizer.step()
+
+        print(f"Epoch {epoch}: Loss = {loss}, Reward = {reward}")
+
+
+def calculate_reward(err):
+    return -torch.tensor(err)
+
+
+# 학습 시작
+train_rl_model()
