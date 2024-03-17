@@ -156,7 +156,7 @@ comp_params = NNCompParams(features_setup = features,
                            norm_type_y    = :standardize,
                            TL_coef        = TL_d_4,
                            η_adam         = 0.001,
-                           epoch_adam     = 10,
+                           epoch_adam     = 100,
                            epoch_lbfgs    = 0,
                            hidden         = [8,4]);
 (comp_params,y_train,y_train_hat,err_train,feats) =
@@ -164,48 +164,47 @@ comp_params = NNCompParams(features_setup = features,
 
 (y,y_hat,err,features) =
     comp_test(comp_params,[line],df_all,df_flight,df_map);
-
-println("output: ",y[1:5])
-println("prediction: ",y_hat[1:5])
-println("error: ",err[1:5] )
-
-println("output len: ",length(y))
-println("prediction len: ",length(y_hat))
-println("error len: ", length(err))
 """
 )
 
 # Hyperparameters
 input_dim = 5  # number of input features
-hidden_dim = 128
+hidden_dim = 64
 output_dim = 1
-strength = 1
+strength = 0.001
+gamma = 0.99
 
 
 class ActorCritic(nn.Module):
-    def __init__(self, input_dim, hidden_dim, action_dim):
+    def __init__(self, input_dim, hidden_dim, action_dim, init_std=0.02):
         super(ActorCritic, self).__init__()
         self.common_layer = nn.Linear(input_dim, hidden_dim)
+        self.hiden_layer = nn.Linear(hidden_dim, hidden_dim)
 
         self.actor_mu = nn.Linear(hidden_dim, action_dim)
-
         self.actor_log_std = nn.Parameter(torch.zeros(1, action_dim))
 
         self.critic = nn.Linear(hidden_dim, 1)
 
+        self.init_weights(init_std)
+
+    def init_weights(self, init_std):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.normal_(m.weight, mean=0.0, std=init_std)
+                nn.init.constant_(m.bias, 0.0)
+
     def forward(self, x):
         x = F.relu(self.common_layer(x))
+        x = F.relu(self.hiden_layer(x))
 
         mu = self.actor_mu(x)
         log_std = self.actor_log_std.expand_as(mu)
         std = torch.exp(log_std)
 
         normal_dist = torch.distributions.Normal(mu, std)
-
         action = normal_dist.rsample()  # Reparameterization Trick
-
         log_prob = normal_dist.log_prob(action)
-
         action = torch.tanh(action)
 
         state_value = self.critic(x)
@@ -214,9 +213,9 @@ class ActorCritic(nn.Module):
 
 
 # 강화학습 학습 과정
-def train_rl_model(epochs=10):
+def train_rl_model(epochs=200):
     model = ActorCritic(input_dim, hidden_dim, output_dim)
-    optimizer = optim.Adam(model.parameters(), lr=0.01)
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
 
     for epoch in range(epochs):
         optimizer.zero_grad()  # Initialize the gradients to zero
@@ -238,43 +237,58 @@ def train_rl_model(epochs=10):
         map_TL = false
         return_B = true
         silent = true
-        """
-        )
-        Main.eval(
-            """
+
         (A, Bt, B_dot, x, y, no_norm, features, l_segs) = get_Axy([line], df_all, df_flight, df_map, features_setup; features_no_norm = features_no_norm, y_type = y_type, use_mag = use_mag, use_vec = use_vec, terms = terms, terms_A = terms_A, sub_diurnal = sub_diurnal, sub_igrf = sub_igrf, bpf_mag = bpf_mag, reorient_vec = reorient_vec, mod_TL = mod_TL, map_TL = map_TL, return_B = return_B, silent = silent); 
         """
         )
         x = Main.x
         x = torch.tensor(x, dtype=torch.float32)
         action, state_value, log_prob = model(x)
-        action *= strength
-        Main.action = action.detach().numpy()
+        normalized_action = action * strength
+        Main.action = normalized_action.detach().numpy()
 
         Main.eval(
             """
         # MagNav 시뮬레이션 코드
-        (y,y_hat,err,features) = comp_test_RL(comp_params,[line],df_all,df_flight,df_map, action);
+        (x,y,y_hat,err,features) = comp_test_RL(comp_params,[line],df_all,df_flight,df_map, action);
         """
         )
         err = Main.eval("err")
+        next_state = Main.x
+        with torch.no_grad():
+            _, next_state_value, _ = model(
+                torch.tensor(next_state, dtype=torch.float32)
+            )
 
         # 보상 계산 및 모델 업데이트
-        reward = calculate_reward(err)  # 오류를 기반으로 보상 계산 함수
-        critic_loss = 0.5 * F.mse_loss(state_value, reward)
+        reward = (
+            calculate_reward(err).float().unsqueeze(1)
+        )  # 오류를 기반으로 보상 계산 함수
+        updated_reward = reward + gamma * next_state_value
+        critic_loss = (updated_reward - state_value).pow(2).mean()
+        advantage = updated_reward - state_value.detach()
+        actor_loss = (-log_prob * advantage).mean()
 
-        advantage = reward - state_value.detach()
-        actor_loss = -log_prob * advantage
+        action_penalty = action**2  # 행동 값의 제곱의 평균을 페널티로 사용
 
-        loss = critic_loss + actor_loss
-        loss.backward()
+        # 기존의 손실에 페널티를 추가합니다.
+        # 여기서 penalty_weight는 페널티의 영향력을 조절하는 가중치입니다.
+        penalty_weight = 0.0  # 이 값을 조정하여 페널티의 영향력을 조절할 수 있습니다.
+
+        print("actor_loss: ", actor_loss)
+        print("critic_loss: ", critic_loss)
+        print("action_penalty: ", action_penalty.mean())
+        total_loss = actor_loss + critic_loss
+
+        total_loss = total_loss.float()
+        total_loss.backward()
         optimizer.step()
 
-        print(f"Epoch {epoch}: Loss = {loss}, Reward = {reward}")
+        print(f"Epoch {epoch}: Loss = {total_loss}, Reward = {reward}")
 
 
 def calculate_reward(err):
-    return -torch.tensor(err)
+    return torch.abs(torch.tensor(err, dtype=torch.float32))
 
 
 # 학습 시작

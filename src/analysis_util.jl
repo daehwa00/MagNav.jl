@@ -996,12 +996,9 @@ function get_Axy(lines, df_line::DataFrame,
         end
     end
 
-    println("X shape: ", size(x))
     if return_B
-        println("HIHI")
         return (A, Bt, B_dot, x, y, no_norm, features, l_segs)
     else
-        println("HEEEELLLLOOOO")
         return (A, x, y, no_norm, features, l_segs)
     end
 end # function get_Axy

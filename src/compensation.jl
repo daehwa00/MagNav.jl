@@ -3479,7 +3479,6 @@ function comp_test_RL(comp_params::CompParams, lines,
                                             silent           = silent_debug)
     end
 
-    x[:,1] = x[:,1] .+ action
     y_hat = zero(y) # initialize
     err   = 10*y    # initialize
 
@@ -3541,9 +3540,10 @@ function comp_test_RL(comp_params::CompParams, lines,
         silent || @info("returning best feature importance results")
 
     else
-
+        x[:,2] = x[:,2] .+ action
         # evaluate model
         if model_type in [:m1]
+            print("A")
             (y_hat,err) = nn_comp_1_test(x,y,data_norms,model;
                                          l_segs     = l_segs,
                                          silent     = silent)
@@ -3580,7 +3580,7 @@ function comp_test_RL(comp_params::CompParams, lines,
 
     err = y - y_hat
 
-    return (y, y_hat, err, features)
+    return (x, y, y_hat, err, features)
 end # function comp_test_RL
 
 
