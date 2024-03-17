@@ -168,7 +168,7 @@ comp_params = NNCompParams(features_setup = features,
 )
 
 # Hyperparameters
-input_dim = 5  # number of input features
+input_dim = 5 + 1  # number of input features + output y
 hidden_dim = 64
 output_dim = 1
 strength = 0.001
@@ -214,6 +214,9 @@ class ActorCritic(nn.Module):
 
 # 강화학습 학습 과정
 def train_rl_model(epochs=200):
+    actor_losses = []
+    critic_losses = []
+    rewards = []
     model = ActorCritic(input_dim, hidden_dim, output_dim)
     optimizer = optim.Adam(model.parameters(), lr=0.001)
 
@@ -238,32 +241,39 @@ def train_rl_model(epochs=200):
         return_B = true
         silent = true
 
+        (y,y_hat,state_value,features) =
+            comp_test(comp_params,[line],df_all,df_flight,df_map);
+
         (A, Bt, B_dot, x, y, no_norm, features, l_segs) = get_Axy([line], df_all, df_flight, df_map, features_setup; features_no_norm = features_no_norm, y_type = y_type, use_mag = use_mag, use_vec = use_vec, terms = terms, terms_A = terms_A, sub_diurnal = sub_diurnal, sub_igrf = sub_igrf, bpf_mag = bpf_mag, reorient_vec = reorient_vec, mod_TL = mod_TL, map_TL = map_TL, return_B = return_B, silent = silent); 
         """
         )
-        x = Main.x
-        x = torch.tensor(x, dtype=torch.float32)
-        action, state_value, log_prob = model(x)
+        x = torch.tensor(Main.x, dtype=torch.float32)
+        y = torch.tensor(Main.y_hat, dtype=torch.float32).unsqueeze(1)
+        x = torch.cat((x, y), 1)
+        action, state_value, log_prob = model(x)  # 현재 state에서 에러를 예측
         normalized_action = action * strength
         Main.action = normalized_action.detach().numpy()
 
         Main.eval(
             """
         # MagNav 시뮬레이션 코드
-        (x,y,y_hat,err,features) = comp_test_RL(comp_params,[line],df_all,df_flight,df_map, action);
+        (x,y,y_hat,next_state_value,features) = comp_test_RL(comp_params,[line],df_all,df_flight,df_map, action);
         """
         )
-        err = Main.eval("err")
-        next_state = Main.x
+        x = torch.tensor(Main.x, dtype=torch.float32)
+        y = torch.tensor(Main.y_hat, dtype=torch.float32).unsqueeze(1)
+        next_state = torch.cat((x, y), 1)
         with torch.no_grad():
             _, next_state_value, _ = model(
                 torch.tensor(next_state, dtype=torch.float32)
             )
 
+        reward = Main.state_value - Main.next_state_value
         # 보상 계산 및 모델 업데이트
         reward = (
-            calculate_reward(err).float().unsqueeze(1)
+            calculate_reward(reward).float().unsqueeze(1)
         )  # 오류를 기반으로 보상 계산 함수
+
         updated_reward = reward + gamma * next_state_value
         critic_loss = (updated_reward - state_value).pow(2).mean()
         advantage = updated_reward - state_value.detach()
@@ -286,9 +296,41 @@ def train_rl_model(epochs=200):
 
         print(f"Epoch {epoch}: Loss = {total_loss}, Reward = {reward}")
 
+        # Collect loss and reward for plotting
+        actor_losses.append(actor_loss.item())
+        critic_losses.append(critic_loss.item())
+        rewards.append(reward.mean().item())
+
+    plt.figure(figsize=(12, 8))
+
+    plt.subplot(3, 1, 1)
+    plt.plot(actor_losses, label="Actor Loss")
+    plt.title("Actor Loss")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.legend()
+
+    plt.subplot(3, 1, 2)
+    plt.plot(critic_losses, label="Critic Loss")
+    plt.title("Critic Loss")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.legend()
+
+    plt.subplot(3, 1, 3)
+    plt.plot(rewards, label="Reward")
+    plt.title("Reward")
+    plt.xlabel("Epoch")
+    plt.ylabel("Reward")
+    plt.legend()
+
+    plt.tight_layout()
+    plt.savefig("./rl_training_plots.png")
+    plt.show()
+
 
 def calculate_reward(err):
-    return torch.abs(torch.tensor(err, dtype=torch.float32))
+    return torch.tensor(err, dtype=torch.float32)
 
 
 # 학습 시작
