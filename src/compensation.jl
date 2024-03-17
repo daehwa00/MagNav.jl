@@ -1,3 +1,5 @@
+export comp_test_RL
+
 """
     nn_comp_1_train(x, y, no_norm;
                     norm_type_x::Symbol  = :standardize,
@@ -2843,7 +2845,7 @@ Train an aeromagnetic compensation model.
 - `features`:    length `Nf` feature vector (including components of TL `A`, etc.)
 """
 function comp_train(comp_params::CompParams, lines,
-                    df_line::DataFrame, df_flight::DataFrame, df_map::DataFrame;
+                    df_line::DataFrame, df_flight::DataFrame, df_map::DataFrame,;
                     σ_curriculum          = 1.0,
                     l_window::Int         = 5,
                     window_type::Symbol   = :sliding,
@@ -3387,6 +3389,200 @@ function comp_test(comp_params::CompParams, lines,
 
     return (y, y_hat, err, features)
 end # function comp_test
+
+function comp_test_RL(comp_params::CompParams, lines,
+    df_line::DataFrame, df_flight::DataFrame, df_map::DataFrame, action;
+    l_window::Int = 5,
+    silent::Bool  = false)
+
+
+    seed!(2) # for reproducibility
+    t0 = time()
+
+    # unpack parameters
+    if typeof(comp_params) <: NNCompParams
+        @unpack version, features_setup, features_no_norm, model_type, y_type,
+        use_mag, use_vec, data_norms, model, terms, terms_A, sub_diurnal,
+        sub_igrf, bpf_mag, reorient_vec, norm_type_A, norm_type_x, norm_type_y,
+        TL_coef, η_adam, epoch_adam, epoch_lbfgs, hidden, activation,
+        batchsize, frac_train, α_sgl, λ_sgl, k_pca,
+        drop_fi, drop_fi_bson, drop_fi_csv, perm_fi, perm_fi_csv = comp_params
+    elseif typeof(comp_params) <: LinCompParams
+        @unpack version, features_setup, features_no_norm, model_type, y_type,
+        use_mag, use_vec, data_norms, model, terms, terms_A, sub_diurnal,
+        sub_igrf, bpf_mag, reorient_vec, norm_type_A, norm_type_x, norm_type_y,
+        k_plsr, λ_TL = comp_params
+        drop_fi = false
+        perm_fi = false
+    end
+
+    if ((model_type in [:TL,:mod_TL]) & (y_type != :d)) | (y_type == :e)
+        silent || @info("forcing y_type $(y_type) => :d (Δmag)")
+        y_type = :d
+    end
+    if (model_type in [:map_TL]) & (y_type != :c)
+        silent || @info("forcing y_type $(y_type) => :c (aircraft field #1, using map)")
+        y_type = :c
+    end
+    if model_type in [:m3tl,:m3s,:m3v,:m3sc,:m3vc,:m3w,:m3tf]
+        for term in terms_A
+            if term in [:fdm,:f,:fdm3,:f3,:bias,:b]
+                silent || @info("ignoring $term term in terms_A")
+                A_test = create_TL_A([1.0],[1.0],[1.0];terms=terms_A)
+                if length(A_test) == length(TL_coef)
+                    ind_term = get_TL_term_ind(term,terms_A)
+                    silent || @info("ignoring $(sum(ind_term)) value(s) in TL_coef")
+                    TL_coef = TL_coef[.!ind_term]
+                end
+                terms_A = terms_A[terms_A .!= term]
+            end
+        end
+    end
+
+    mod_TL = model_type == :mod_TL ? true : false
+    map_TL = model_type == :map_TL ? true : false
+
+    # load data
+    if model_type in [:m3tl,:m3s,:m3v,:m3sc,:m3vc,:m3w,:m3tf]
+        (A,Bt,B_dot,x,y,_,features,l_segs) = get_Axy(lines,df_line,df_flight,df_map,
+                                                     features_setup;
+                                                     features_no_norm = features_no_norm,
+                                                     y_type           = y_type,
+                                                     use_mag          = use_mag,
+                                                     use_vec          = use_vec,
+                                                     terms            = terms,
+                                                     terms_A          = terms_A,
+                                                     sub_diurnal      = sub_diurnal,
+                                                     sub_igrf         = sub_igrf,
+                                                     bpf_mag          = bpf_mag,
+                                                     reorient_vec     = reorient_vec,
+                                                     mod_TL           = mod_TL,
+                                                     map_TL           = map_TL,
+                                                     return_B         = true,
+                                                     silent           = silent_debug)
+    else
+        (A,x,y,_,features,l_segs) = get_Axy(lines,df_line,df_flight,df_map,
+                                            features_setup;
+                                            features_no_norm = features_no_norm,
+                                            y_type           = y_type,
+                                            use_mag          = use_mag,
+                                            use_vec          = use_vec,
+                                            terms            = terms,
+                                            terms_A          = terms_A,
+                                            sub_diurnal      = sub_diurnal,
+                                            sub_igrf         = sub_igrf,
+                                            bpf_mag          = bpf_mag,
+                                            reorient_vec     = reorient_vec,
+                                            mod_TL           = mod_TL,
+                                            map_TL           = map_TL,
+                                            return_B         = false,
+                                            silent           = silent_debug)
+    end
+
+    x[:,1] = x[:,1] .+ action
+    y_hat = zero(y) # initialize
+    err   = 10*y    # initialize
+
+    if drop_fi | perm_fi
+
+        drop_fi_bson = remove_extension(drop_fi_bson,".bson")
+        drop_fi_csv  = add_extension(drop_fi_csv,".csv")
+        perm_fi_csv  = add_extension(perm_fi_csv,".csv")
+
+        for i in axes(x,2)
+
+            if perm_fi
+                x_fi = deepcopy(x)
+                x_fi[:,i] .= x[randperm(size(x,1)),i]
+                fi_csv = perm_fi_csv
+            elseif drop_fi
+                x_fi = x[:, axes(x,2) .!= i]
+                comp_params = get_comp_params(drop_fi_bson*"_$i.bson",silent_debug)
+                data_norms  = comp_params.data_norms
+                model       = comp_params.model
+                fi_csv      = drop_fi_csv
+            end
+
+            # evaluate model
+            if model_type in [:m1]
+                (y_hat_fi,err_fi) = nn_comp_1_test(x_fi,y,data_norms,model;
+                                                   l_segs     = l_segs,
+                                                   silent     = silent)
+            elseif model_type in [:m2a,:m2b,:m2c,:m2d]
+                (y_hat_fi,err_fi) = nn_comp_2_test(A,x_fi,y,data_norms,model;
+                                                   model_type = model_type,
+                                                   TL_coef    = TL_coef,
+                                                   l_segs     = l_segs,
+                                                   silent     = silent)
+            elseif model_type in [:m3tl,:m3s,:m3v,:m3sc,:m3vc,:m3w,:m3tf]
+                (y_hat_fi,err_fi) = nn_comp_3_test(A,Bt,B_dot,x_fi,y,data_norms,model;
+                                                   model_type = model_type,
+                                                   y_type     = y_type,
+                                                   TL_coef    = TL_coef,
+                                                   terms_A    = terms_A,
+                                                   l_segs     = l_segs,
+                                                   l_window   = l_window,
+                                                   silent     = silent)
+            else
+                error("$model_type model type not defined")
+            end
+
+            if std(err_fi) < std(err)
+                y_hat = y_hat_fi
+                err   = err_fi
+            end
+
+            open(fi_csv,"a") do file
+                writedlm(file,zip(i,std(err_fi)),',')
+            end
+
+        end
+
+        silent || @info("returning best feature importance results")
+
+    else
+
+        # evaluate model
+        if model_type in [:m1]
+            (y_hat,err) = nn_comp_1_test(x,y,data_norms,model;
+                                         l_segs     = l_segs,
+                                         silent     = silent)
+        elseif model_type in [:m2a,:m2b,:m2c,:m2d]
+            (y_hat,err) = nn_comp_2_test(A,x,y,data_norms,model;
+                                         model_type = model_type,
+                                         TL_coef    = TL_coef,
+                                         l_segs     = l_segs,
+                                         silent     = silent)
+        elseif model_type in [:m3tl,:m3s,:m3v,:m3sc,:m3vc,:m3w,:m3tf]
+            (y_hat,err) = nn_comp_3_test(A,Bt,B_dot,x,y,data_norms,model;
+                                         model_type = model_type,
+                                         y_type     = y_type,
+                                         TL_coef    = TL_coef,
+                                         terms_A    = terms_A,
+                                         l_segs     = l_segs,
+                                         l_window   = l_window,
+                                         silent     = silent)
+        elseif model_type in [:TL,:mod_TL,:map_TL]
+            (y_hat,err) = linear_test(A,y,data_norms,model;
+                                         l_segs     = l_segs,
+                                         silent     = silent)
+        elseif model_type in [:elasticnet,:plsr]
+            (y_hat,err) = linear_test(x,y,data_norms,model;
+                                         l_segs     = l_segs,
+                                         silent     = silent)
+        else
+            error("$model_type model type not defined")
+        end
+
+    end
+
+    silent || print_time(time()-t0,1)
+
+    err = y - y_hat
+
+    return (y, y_hat, err, features)
+end # function comp_test_RL
+
 
 """
     comp_m2bc_test(comp_params::NNCompParams, lines,

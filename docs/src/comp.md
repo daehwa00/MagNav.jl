@@ -22,4 +22,5 @@ comp_train
 
 ```@docs
 comp_test
+comp_test_RL
 ```

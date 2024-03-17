@@ -178,7 +178,8 @@ println("error len: ", length(err))
 # Hyperparameters
 input_dim = 5  # number of input features
 hidden_dim = 128
-output_dim = 2
+output_dim = 1
+strength = 1
 
 
 class ActorCritic(nn.Module):
@@ -203,11 +204,13 @@ class ActorCritic(nn.Module):
 
         action = normal_dist.rsample()  # Reparameterization Trick
 
+        log_prob = normal_dist.log_prob(action)
+
         action = torch.tanh(action)
 
         state_value = self.critic(x)
 
-        return action, state_value, mu, log_std
+        return action, state_value, log_prob
 
 
 # 강화학습 학습 과정
@@ -216,6 +219,7 @@ def train_rl_model(epochs=10):
     optimizer = optim.Adam(model.parameters(), lr=0.01)
 
     for epoch in range(epochs):
+        optimizer.zero_grad()  # Initialize the gradients to zero
         Main.eval(
             """
         line = 1006.08
@@ -243,8 +247,10 @@ def train_rl_model(epochs=10):
         )
         x = Main.x
         x = torch.tensor(x, dtype=torch.float32)
-        action = model(x)
-        Main.eval("action = {}".format(action))
+        action, state_value, log_prob = model(x)
+        action *= strength
+        Main.action = action.detach().numpy()
+
         Main.eval(
             """
         # MagNav 시뮬레이션 코드
@@ -255,7 +261,13 @@ def train_rl_model(epochs=10):
 
         # 보상 계산 및 모델 업데이트
         reward = calculate_reward(err)  # 오류를 기반으로 보상 계산 함수
-        loss = model.update(reward)  # 모델 업데이트
+        critic_loss = 0.5 * F.mse_loss(state_value, reward)
+
+        advantage = reward - state_value.detach()
+        actor_loss = -log_prob * advantage
+
+        loss = critic_loss + actor_loss
+        loss.backward()
         optimizer.step()
 
         print(f"Epoch {epoch}: Loss = {loss}, Reward = {reward}")
