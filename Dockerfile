@@ -4,7 +4,7 @@
 # https://jupyter-docker-stacks.readthedocs.io/en/latest/using/selecting.html#jupyter-julia-notebook
 # ------------------------------------------------------------------------------
 # Build/Run commands via Docker
-# docker build --tag magnav .
+# docker build --tag magnav . 
 # docker run -p 8888:8888 magnav
 # ------------------------------------------------------------------------------
 
